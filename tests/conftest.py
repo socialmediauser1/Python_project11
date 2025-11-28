@@ -3,16 +3,22 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
-from main import Base, app, get_db
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from main import Base, app, get_db
+
 @pytest.fixture()
 def client() -> TestClient:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
     app.state.TestingSessionLocal = TestingSessionLocal
@@ -22,12 +28,12 @@ def client() -> TestClient:
             yield db
         finally:
             db.close()
-
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_db, None)
-    app.state.pop("TestingSessionLocal", None)
+    if hasattr(app.state, "TestingSessionLocal"):
+        delattr(app.state, "TestingSessionLocal")
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
